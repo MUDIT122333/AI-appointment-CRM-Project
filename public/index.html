@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DISPATCH — AI Calling & CRM Demo</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <h1>DISPATCH</h1>
+                    <p class="tagline">AI Calling & CRM Demo</p>
+                </div>
+                <nav class="nav">
+                    <button class="nav-btn active" data-view="intake">
+                        <span class="nav-icon">📝</span>
+                        Intake
+                    </button>
+                    <button class="nav-btn" data-view="dashboard">
+                        <span class="nav-icon">📊</span>
+                        CRM Dashboard
+                    </button>
+                    <button class="nav-btn" data-view="voice">
+                        <span class="nav-icon">🎤</span>
+                        Voice Demo
+                    </button>
+                </nav>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Intake View -->
+            <section id="intake-view" class="view active">
+                <div class="intake-container">
+                    <!-- Workflow Steps -->
+                    <div class="workflow-steps">
+                        <div class="step active" data-step="1">
+                            <div class="step-number">01</div>
+                            <div class="step-label">Message</div>
+                        </div>
+                        <div class="step" data-step="2">
+                            <div class="step-number">02</div>
+                            <div class="step-label">Extracted Lead</div>
+                        </div>
+                        <div class="step" data-step="3">
+                            <div class="step-number">03</div>
+                            <div class="step-label">Pick a Slot</div>
+                        </div>
+                        <div class="step" data-step="4">
+                            <div class="step-number">04</div>
+                            <div class="step-label">Booked</div>
+                        </div>
+                    </div>
+
+                    <!-- Step 1: Message Input -->
+                    <div class="intake-step active" data-step="1">
+                        <div class="card">
+                            <h2>Customer Message</h2>
+                            <p class="card-description">Enter a customer message to analyze and extract lead information.</p>
+                            <textarea 
+                                id="message-input" 
+                                class="message-input" 
+                                placeholder="Hi, I'm Rahul. I need an AI calling solution and would like to schedule a meeting tomorrow."
+                                rows="4"
+                            ></textarea>
+                            <div class="button-group">
+                                <button id="analyze-btn" class="btn btn-primary">
+                                    <span class="btn-text">Analyze Message</span>
+                                    <span class="btn-loader hidden">Analyzing...</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Step 2: Extracted Lead -->
+                    <div class="intake-step" data-step="2">
+                        <div class="card">
+                            <h2>Extracted Lead Information</h2>
+                            <p class="card-description">Review the extracted lead information before proceeding.</p>
+                            <div id="extracted-lead" class="lead-info">
+                                <!-- Populated by JavaScript -->
+                            </div>
+                            <div class="button-group">
+                                <button id="back-to-message-btn" class="btn btn-secondary">Back</button>
+                                <button id="get-slots-btn" class="btn btn-primary">
+                                    <span class="btn-text">View Available Slots</span>
+                                    <span class="btn-loader hidden">Loading...</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Step 3: Pick a Slot -->
+                    <div class="intake-step" data-step="3">
+                        <div class="card">
+                            <h2>Available Meeting Slots</h2>
+                            <p class="card-description">Select a convenient time slot for the meeting.</p>
+                            <div id="slots-container" class="slots-container">
+                                <!-- Populated by JavaScript -->
+                            </div>
+                            <div class="button-group">
+                                <button id="back-to-lead-btn" class="btn btn-secondary">Back</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Step 4: Booked -->
+                    <div class="intake-step" data-step="4">
+                        <div class="card">
+                            <h2>Booking Confirmed!</h2>
+                            <p class="card-description">The appointment has been successfully booked.</p>
+                            <div id="booking-confirmation" class="booking-confirmation">
+                                <!-- Populated by JavaScript -->
+                            </div>
+                            <div class="button-group">
+                                <button id="new-intake-btn" class="btn btn-primary">New Intake</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Dashboard View -->
+            <section id="dashboard-view" class="view">
+                <div class="dashboard-container">
+                    <!-- Stats Cards -->
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon">👥</div>
+                            <div class="stat-content">
+                                <div class="stat-value" id="stat-total-leads">0</div>
+                                <div class="stat-label">Total Leads</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">✨</div>
+                            <div class="stat-content">
+                                <div class="stat-value" id="stat-new-leads">0</div>
+                                <div class="stat-label">New Leads</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">✓</div>
+                            <div class="stat-content">
+                                <div class="stat-value" id="stat-qualified-leads">0</div>
+                                <div class="stat-label">Qualified Leads</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">📅</div>
+                            <div class="stat-content">
+                                <div class="stat-value" id="stat-meetings">0</div>
+                                <div class="stat-label">Meetings</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">💰</div>
+                            <div class="stat-content">
+                                <div class="stat-value" id="stat-converted">0</div>
+                                <div class="stat-label">Converted</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Leads Table -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>Leads</h2>
+                            <button id="refresh-dashboard-btn" class="btn btn-secondary btn-sm">
+                                <span class="btn-icon">🔄</span>
+                                Refresh
+                            </button>
+                        </div>
+                        <div class="table-container">
+                            <table class="leads-table">
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Requirement</th>
+                                        <th>Status</th>
+                                        <th>Priority</th>
+                                        <th>Appointment</th>
+                                        <th>Created</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="leads-table-body">
+                                    <!-- Populated by JavaScript -->
+                                </tbody>
+                            </table>
+                            <div id="empty-state" class="empty-state hidden">
+                                <div class="empty-icon">📭</div>
+                                <p>No leads yet. Start by processing a customer message.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Lead Details Modal -->
+                    <div id="lead-modal" class="modal hidden">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h2>Lead Details</h2>
+                                <button class="modal-close" id="close-modal">&times;</button>
+                            </div>
+                            <div id="lead-modal-body" class="modal-body">
+                                <!-- Populated by JavaScript -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Voice Demo View -->
+            <section id="voice-view" class="view">
+                <div class="voice-container">
+                    <div class="card">
+                        <h2>Voice Demo</h2>
+                        <p class="card-description">Use your microphone to speak a customer message. The speech will be converted to text and processed through the same lead extraction workflow.</p>
+                        
+                        <div class="voice-demo-area">
+                            <div id="voice-status" class="voice-status">
+                                <div class="voice-icon">🎤</div>
+                                <p>Click "Start Recording" to begin</p>
+                            </div>
+                            
+                            <div id="voice-transcript" class="voice-transcript hidden">
+                                <label>Transcript:</label>
+                                <p id="transcript-text"></p>
+                            </div>
+                            
+                            <div class="button-group">
+                                <button id="start-voice-btn" class="btn btn-primary">
+                                    <span class="btn-icon">🎙️</span>
+                                    <span class="btn-text">Start Recording</span>
+                                </button>
+                                <button id="stop-voice-btn" class="btn btn-secondary hidden">
+                                    <span class="btn-icon">⏹️</span>
+                                    <span class="btn-text">Stop Recording</span>
+                                </button>
+                            </div>
+                            
+                            <div id="voice-error" class="error-message hidden"></div>
+                            
+                            <div id="voice-response" class="voice-response hidden">
+                                <label>AI Response:</label>
+                                <p id="response-text"></p>
+                            </div>
+                        </div>
+                        
+                        <div class="voice-note">
+                            <p><strong>Note:</strong> This demo uses the browser's Web Speech API. Support varies by browser. Chrome and Edge provide the best experience.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Toast Notifications -->
+        <div id="toast-container" class="toast-container"></div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
