@@ -1,318 +1,621 @@
-const fs = require('fs');
-const path = require('path');
+/**
+ * Supabase PostgreSQL Database Layer
+ * Replaces the previous JSON-file database implementation.
+ */
 
-// Data directory
-const DATA_DIR = path.join(__dirname, '..', 'data');
+require('dotenv').config();
 
-// Ensure data directory exists
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+const postgres = require('postgres');
+const crypto = require('crypto');
+
+if (!process.env.DATABASE_URL) {
+  throw new Error('DATABASE_URL is not defined in .env');
 }
 
-// Database file paths
-const CONTACTS_FILE = path.join(DATA_DIR, 'contacts.json');
-const LEADS_FILE = path.join(DATA_DIR, 'leads.json');
-const CONVERSATIONS_FILE = path.join(DATA_DIR, 'conversations.json');
-const APPOINTMENTS_FILE = path.join(DATA_DIR, 'appointments.json');
+// Create PostgreSQL connection
+const sql = postgres(process.env.DATABASE_URL);
 
-// Initialize database files if they don't exist
-function initializeDatabase() {
-  if (!fs.existsSync(CONTACTS_FILE)) {
-    fs.writeFileSync(CONTACTS_FILE, JSON.stringify([], null, 2));
-  }
-  if (!fs.existsSync(LEADS_FILE)) {
-    fs.writeFileSync(LEADS_FILE, JSON.stringify([], null, 2));
-  }
-  if (!fs.existsSync(CONVERSATIONS_FILE)) {
-    fs.writeFileSync(CONVERSATIONS_FILE, JSON.stringify([], null, 2));
-  }
-  if (!fs.existsSync(APPOINTMENTS_FILE)) {
-    fs.writeFileSync(APPOINTMENTS_FILE, JSON.stringify([], null, 2));
-  }
-}
-
-// Generic read function
-function readData(filePath) {
-  try {
-    const data = fs.readFileSync(filePath, 'utf8');
-    return JSON.parse(data);
-  } catch (error) {
-    console.error(`Error reading ${filePath}:`, error);
-    return [];
-  }
-}
-
-// Generic write function
-function writeData(filePath, data) {
-  try {
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-    return true;
-  } catch (error) {
-    console.error(`Error writing ${filePath}:`, error);
-    return false;
-  }
-}
-
-// Generate unique ID
+// Generate UUID
 function generateId() {
-  return Date.now().toString(36) + Math.random().toString(36).substr(2);
+  return crypto.randomUUID();
 }
 
-// Contact operations
+/**
+ * Convert PostgreSQL snake_case records
+ * into the camelCase format used by the application.
+ */
+
+function mapContact(row) {
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    phone: row.phone,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function mapLead(row) {
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    contactId: row.contact_id,
+    requirement: row.requirement,
+    status: row.status,
+    priority: row.priority,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function mapConversation(row) {
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    contactId: row.contact_id,
+    leadId: row.lead_id,
+    message: row.message,
+    direction: row.direction,
+    createdAt: row.created_at
+  };
+}
+
+function mapAppointment(row) {
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    contactId: row.contact_id,
+    leadId: row.lead_id,
+    scheduledAt: row.scheduled_at,
+    status: row.status,
+    createdAt: row.created_at
+  };
+}
+
+/* =========================================================
+   CONTACT
+========================================================= */
+
 const Contact = {
-  getAll: () => readData(CONTACTS_FILE),
-  
-  getById: (id) => {
-    const contacts = readData(CONTACTS_FILE);
-    return contacts.find(c => c.id === id);
+
+  async getAll() {
+    const rows = await sql`
+      SELECT *
+      FROM contacts
+      ORDER BY created_at DESC
+    `;
+
+    return rows.map(mapContact);
   },
-  
-  findByName: (name) => {
-    const contacts = readData(CONTACTS_FILE);
-    return contacts.find(c => c.name.toLowerCase() === name.toLowerCase());
+
+  async getById(id) {
+    const rows = await sql`
+      SELECT *
+      FROM contacts
+      WHERE id = ${id}
+      LIMIT 1
+    `;
+
+    return rows.length ? mapContact(rows[0]) : null;
   },
-  
-  create: (data) => {
-    const contacts = readData(CONTACTS_FILE);
-    const contact = {
-      id: generateId(),
-      name: data.name,
-      email: data.email || null,
-      phone: data.phone || null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    contacts.push(contact);
-    writeData(CONTACTS_FILE, contacts);
-    return contact;
+
+  async findByName(name) {
+    const rows = await sql`
+      SELECT *
+      FROM contacts
+      WHERE LOWER(name) = LOWER(${name})
+      LIMIT 1
+    `;
+
+    return rows.length ? mapContact(rows[0]) : null;
   },
-  
-  update: (id, data) => {
-    const contacts = readData(CONTACTS_FILE);
-    const index = contacts.findIndex(c => c.id === id);
-    if (index !== -1) {
-      contacts[index] = {
-        ...contacts[index],
-        ...data,
-        updatedAt: new Date().toISOString()
-      };
-      writeData(CONTACTS_FILE, contacts);
-      return contacts[index];
-    }
-    return null;
+
+  async create(data) {
+    const id = generateId();
+
+    const rows = await sql`
+      INSERT INTO contacts (
+        id,
+        name,
+        email,
+        phone
+      )
+      VALUES (
+        ${id},
+        ${data.name},
+        ${data.email || null},
+        ${data.phone || null}
+      )
+      RETURNING *
+    `;
+
+    return mapContact(rows[0]);
+  },
+
+  async update(id, data) {
+    const rows = await sql`
+      UPDATE contacts
+      SET
+        name = COALESCE(${data.name ?? null}, name),
+        email = COALESCE(${data.email ?? null}, email),
+        phone = COALESCE(${data.phone ?? null}, phone),
+        updated_at = NOW()
+      WHERE id = ${id}
+      RETURNING *
+    `;
+
+    return rows.length ? mapContact(rows[0]) : null;
   }
 };
 
-// Lead operations
+
+/* =========================================================
+   LEAD
+========================================================= */
+
 const Lead = {
-  getAll: () => readData(LEADS_FILE),
-  
-  getById: (id) => {
-    const leads = readData(LEADS_FILE);
-    return leads.find(l => l.id === id);
+
+  async getAll() {
+    const rows = await sql`
+      SELECT *
+      FROM leads
+      ORDER BY created_at DESC
+    `;
+
+    return rows.map(mapLead);
   },
-  
-  getByContactId: (contactId) => {
-    const leads = readData(LEADS_FILE);
-    return leads.filter(l => l.contactId === contactId);
+
+  async getById(id) {
+    const rows = await sql`
+      SELECT *
+      FROM leads
+      WHERE id = ${id}
+      LIMIT 1
+    `;
+
+    return rows.length ? mapLead(rows[0]) : null;
   },
-  
-  create: (data) => {
-    const leads = readData(LEADS_FILE);
-    const lead = {
-      id: generateId(),
-      contactId: data.contactId,
-      requirement: data.requirement,
-      status: data.status || 'NEW',
-      priority: data.priority || 'MEDIUM',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    leads.push(lead);
-    writeData(LEADS_FILE, leads);
-    return lead;
+
+  async getByContactId(contactId) {
+    const rows = await sql`
+      SELECT *
+      FROM leads
+      WHERE contact_id = ${contactId}
+      ORDER BY created_at DESC
+    `;
+
+    return rows.map(mapLead);
   },
-  
-  update: (id, data) => {
-    const leads = readData(LEADS_FILE);
-    const index = leads.findIndex(l => l.id === id);
-    if (index !== -1) {
-      leads[index] = {
-        ...leads[index],
-        ...data,
-        updatedAt: new Date().toISOString()
-      };
-      writeData(LEADS_FILE, leads);
-      return leads[index];
-    }
-    return null;
+
+  async create(data) {
+    const id = generateId();
+
+    const rows = await sql`
+      INSERT INTO leads (
+        id,
+        contact_id,
+        requirement,
+        status,
+        priority
+      )
+      VALUES (
+        ${id},
+        ${data.contactId},
+        ${data.requirement},
+        ${data.status || 'NEW'},
+        ${data.priority || 'MEDIUM'}
+      )
+      RETURNING *
+    `;
+
+    return mapLead(rows[0]);
   },
-  
-  getStats: () => {
-    const leads = readData(LEADS_FILE);
-    return {
-      total: leads.length,
-      new: leads.filter(l => l.status === 'NEW').length,
-      qualified: leads.filter(l => l.status === 'QUALIFIED').length,
-      meetingRequested: leads.filter(l => l.status === 'MEETING_REQUESTED').length,
-      converted: leads.filter(l => l.status === 'CONVERTED').length,
-      lost: leads.filter(l => l.status === 'LOST').length
-    };
+
+  async update(id, data) {
+    const rows = await sql`
+      UPDATE leads
+      SET
+        requirement = COALESCE(${data.requirement ?? null}, requirement),
+        status = COALESCE(${data.status ?? null}, status),
+        priority = COALESCE(${data.priority ?? null}, priority),
+        updated_at = NOW()
+      WHERE id = ${id}
+      RETURNING *
+    `;
+
+    return rows.length ? mapLead(rows[0]) : null;
+  },
+
+  async getStats() {
+    const rows = await sql`
+      SELECT
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE status = 'NEW')::int AS new,
+        COUNT(*) FILTER (WHERE status = 'QUALIFIED')::int AS qualified,
+        COUNT(*) FILTER (WHERE status = 'MEETING_REQUESTED')::int AS "meetingRequested",
+        COUNT(*) FILTER (WHERE status = 'CONVERTED')::int AS converted,
+        COUNT(*) FILTER (WHERE status = 'LOST')::int AS lost
+      FROM leads
+    `;
+
+    return rows[0];
   }
 };
 
-// Conversation operations
+
+/* =========================================================
+   CONVERSATION
+========================================================= */
+
 const Conversation = {
-  getAll: () => readData(CONVERSATIONS_FILE),
-  
-  getById: (id) => {
-    const conversations = readData(CONVERSATIONS_FILE);
-    return conversations.find(c => c.id === id);
+
+  async getAll() {
+    const rows = await sql`
+      SELECT *
+      FROM conversations
+      ORDER BY created_at ASC
+    `;
+
+    return rows.map(mapConversation);
   },
-  
-  getByContactId: (contactId) => {
-    const conversations = readData(CONVERSATIONS_FILE);
-    return conversations.filter(c => c.contactId === contactId).sort((a, b) => 
-      new Date(a.createdAt) - new Date(b.createdAt)
-    );
+
+  async getById(id) {
+    const rows = await sql`
+      SELECT *
+      FROM conversations
+      WHERE id = ${id}
+      LIMIT 1
+    `;
+
+    return rows.length ? mapConversation(rows[0]) : null;
   },
-  
-  getByLeadId: (leadId) => {
-    const conversations = readData(CONVERSATIONS_FILE);
-    return conversations.filter(c => c.leadId === leadId).sort((a, b) => 
-      new Date(a.createdAt) - new Date(b.createdAt)
-    );
+
+  async getByContactId(contactId) {
+    const rows = await sql`
+      SELECT *
+      FROM conversations
+      WHERE contact_id = ${contactId}
+      ORDER BY created_at ASC
+    `;
+
+    return rows.map(mapConversation);
   },
-  
-  create: (data) => {
-    const conversations = readData(CONVERSATIONS_FILE);
-    const conversation = {
-      id: generateId(),
-      contactId: data.contactId,
-      leadId: data.leadId,
-      message: data.message,
-      direction: data.direction || 'INBOUND',
-      createdAt: new Date().toISOString()
-    };
-    conversations.push(conversation);
-    writeData(CONVERSATIONS_FILE, conversations);
-    return conversation;
+
+  async getByLeadId(leadId) {
+    const rows = await sql`
+      SELECT *
+      FROM conversations
+      WHERE lead_id = ${leadId}
+      ORDER BY created_at ASC
+    `;
+
+    return rows.map(mapConversation);
+  },
+
+  async create(data) {
+    const id = generateId();
+
+    const rows = await sql`
+      INSERT INTO conversations (
+        id,
+        contact_id,
+        lead_id,
+        message,
+        direction
+      )
+      VALUES (
+        ${id},
+        ${data.contactId},
+        ${data.leadId},
+        ${data.message || ''},
+        ${data.direction || 'INBOUND'}
+      )
+      RETURNING *
+    `;
+
+    return mapConversation(rows[0]);
   }
 };
 
-// Appointment operations
+
+/* =========================================================
+   APPOINTMENT
+========================================================= */
+
 const Appointment = {
-  getAll: () => readData(APPOINTMENTS_FILE),
-  
-  getById: (id) => {
-    const appointments = readData(APPOINTMENTS_FILE);
-    return appointments.find(a => a.id === id);
+
+  async getAll() {
+    const rows = await sql`
+      SELECT *
+      FROM appointments
+      ORDER BY scheduled_at ASC
+    `;
+
+    return rows.map(mapAppointment);
   },
-  
-  getByContactId: (contactId) => {
-    const appointments = readData(APPOINTMENTS_FILE);
-    return appointments.filter(a => a.contactId === contactId);
+
+  async getById(id) {
+    const rows = await sql`
+      SELECT *
+      FROM appointments
+      WHERE id = ${id}
+      LIMIT 1
+    `;
+
+    return rows.length ? mapAppointment(rows[0]) : null;
   },
-  
-  getByLeadId: (leadId) => {
-    const appointments = readData(APPOINTMENTS_FILE);
-    return appointments.filter(a => a.leadId === leadId);
+
+  async getByContactId(contactId) {
+    const rows = await sql`
+      SELECT *
+      FROM appointments
+      WHERE contact_id = ${contactId}
+      ORDER BY scheduled_at ASC
+    `;
+
+    return rows.map(mapAppointment);
   },
-  
-  create: (data) => {
-    const appointments = readData(APPOINTMENTS_FILE);
-    const appointment = {
-      id: generateId(),
-      contactId: data.contactId,
-      leadId: data.leadId,
-      scheduledAt: data.scheduledAt,
-      status: data.status || 'SCHEDULED',
-      createdAt: new Date().toISOString()
-    };
-    appointments.push(appointment);
-    writeData(APPOINTMENTS_FILE, appointments);
-    return appointment;
+
+  async getByLeadId(leadId) {
+    const rows = await sql`
+      SELECT *
+      FROM appointments
+      WHERE lead_id = ${leadId}
+      ORDER BY scheduled_at ASC
+    `;
+
+    return rows.map(mapAppointment);
   },
-  
-  update: (id, data) => {
-    const appointments = readData(APPOINTMENTS_FILE);
-    const index = appointments.findIndex(a => a.id === id);
-    if (index !== -1) {
-      appointments[index] = {
-        ...appointments[index],
-        ...data
-      };
-      writeData(APPOINTMENTS_FILE, appointments);
-      return appointments[index];
-    }
-    return null;
+
+  async create(data) {
+    const id = generateId();
+
+    const rows = await sql`
+      INSERT INTO appointments (
+        id,
+        contact_id,
+        lead_id,
+        scheduled_at,
+        status
+      )
+      VALUES (
+        ${id},
+        ${data.contactId},
+        ${data.leadId},
+        ${data.scheduledAt},
+        ${data.status || 'SCHEDULED'}
+      )
+      RETURNING *
+    `;
+
+    return mapAppointment(rows[0]);
   },
-  
-  getStats: () => {
-    const appointments = readData(APPOINTMENTS_FILE);
-    return {
-      total: appointments.length,
-      scheduled: appointments.filter(a => a.status === 'SCHEDULED').length,
-      completed: appointments.filter(a => a.status === 'COMPLETED').length,
-      cancelled: appointments.filter(a => a.status === 'CANCELLED').length
-    };
+
+  async update(id, data) {
+    const rows = await sql`
+      UPDATE appointments
+      SET
+        scheduled_at = COALESCE(${data.scheduledAt ?? null}, scheduled_at),
+        status = COALESCE(${data.status ?? null}, status)
+      WHERE id = ${id}
+      RETURNING *
+    `;
+
+    return rows.length ? mapAppointment(rows[0]) : null;
+  },
+
+  async getStats() {
+    const rows = await sql`
+      SELECT
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (
+          WHERE status = 'SCHEDULED'
+        )::int AS scheduled,
+        COUNT(*) FILTER (
+          WHERE status = 'COMPLETED'
+        )::int AS completed,
+        COUNT(*) FILTER (
+          WHERE status = 'CANCELLED'
+        )::int AS cancelled
+      FROM appointments
+    `;
+
+    return rows[0];
   }
 };
 
-// Transaction-like operation for creating a complete booking
-function createBooking(contactData, leadData, conversationData, appointmentData) {
+
+/* =========================================================
+   CREATE COMPLETE BOOKING
+========================================================= */
+
+async function createBooking(
+  contactData,
+  leadData,
+  conversationData,
+  appointmentData
+) {
+
   try {
-    // Find or create contact
-    let contact;
-    if (contactData.name) {
-      contact = Contact.findByName(contactData.name);
-      if (!contact) {
-        contact = Contact.create(contactData);
-      } else {
-        // Update contact with new info if provided
-        if (contactData.email || contactData.phone) {
-          contact = Contact.update(contact.id, {
-            email: contactData.email || contact.email,
-            phone: contactData.phone || contact.phone
-          });
-        }
+
+    const result = await sql.begin(async transaction => {
+
+      /*
+       * 1. Find or create contact
+       */
+
+      let contactRows = [];
+
+      if (contactData.name) {
+
+        contactRows = await transaction`
+          SELECT *
+          FROM contacts
+          WHERE LOWER(name) = LOWER(${contactData.name})
+          LIMIT 1
+        `;
       }
-    } else {
-      contact = Contact.create(contactData);
-    }
-    
-    // Create lead
-    const lead = Lead.create({
-      ...leadData,
-      contactId: contact.id
+
+      let contact;
+
+      if (contactRows.length) {
+
+        contact = contactRows[0];
+
+        // Update email / phone if new information exists
+        if (contactData.email || contactData.phone) {
+
+          const updatedRows = await transaction`
+            UPDATE contacts
+            SET
+              email = COALESCE(${contactData.email ?? null}, email),
+              phone = COALESCE(${contactData.phone ?? null}, phone),
+              updated_at = NOW()
+            WHERE id = ${contact.id}
+            RETURNING *
+          `;
+
+          contact = updatedRows[0];
+        }
+
+      } else {
+
+        const contactId = generateId();
+
+        const newContactRows = await transaction`
+          INSERT INTO contacts (
+            id,
+            name,
+            email,
+            phone
+          )
+          VALUES (
+            ${contactId},
+            ${contactData.name},
+            ${contactData.email || null},
+            ${contactData.phone || null}
+          )
+          RETURNING *
+        `;
+
+        contact = newContactRows[0];
+      }
+
+
+      /*
+       * 2. Create lead
+       */
+
+      const leadId = generateId();
+
+      const leadRows = await transaction`
+        INSERT INTO leads (
+          id,
+          contact_id,
+          requirement,
+          status,
+          priority
+        )
+        VALUES (
+          ${leadId},
+          ${contact.id},
+          ${leadData.requirement},
+          ${leadData.status || 'NEW'},
+          ${leadData.priority || 'MEDIUM'}
+        )
+        RETURNING *
+      `;
+
+      const lead = leadRows[0];
+
+
+      /*
+       * 3. Create conversation
+       */
+
+      const conversationId = generateId();
+
+      const conversationRows = await transaction`
+        INSERT INTO conversations (
+          id,
+          contact_id,
+          lead_id,
+          message,
+          direction
+        )
+        VALUES (
+          ${conversationId},
+          ${contact.id},
+          ${lead.id},
+          ${conversationData.message || ''},
+          ${conversationData.direction || 'INBOUND'}
+        )
+        RETURNING *
+      `;
+
+      const conversation = conversationRows[0];
+
+
+      /*
+       * 4. Create appointment
+       */
+
+      let appointment = null;
+
+      if (appointmentData) {
+
+        const appointmentId = generateId();
+
+        const appointmentRows = await transaction`
+          INSERT INTO appointments (
+            id,
+            contact_id,
+            lead_id,
+            scheduled_at,
+            status
+          )
+          VALUES (
+            ${appointmentId},
+            ${contact.id},
+            ${lead.id},
+            ${appointmentData.scheduledAt},
+            ${appointmentData.status || 'SCHEDULED'}
+          )
+          RETURNING *
+        `;
+
+        appointment = appointmentRows[0];
+      }
+
+
+      /*
+       * Return all created records
+       */
+
+      return {
+        contact: mapContact(contact),
+        lead: mapLead(lead),
+        conversation: mapConversation(conversation),
+        appointment: mapAppointment(appointment)
+      };
     });
-    
-    // Create conversation
-    const conversation = Conversation.create({
-      ...conversationData,
-      contactId: contact.id,
-      leadId: lead.id
-    });
-    
-    // Create appointment if provided
-    let appointment = null;
-    if (appointmentData) {
-      appointment = Appointment.create({
-        ...appointmentData,
-        contactId: contact.id,
-        leadId: lead.id
-      });
-    }
-    
+
+
     return {
       success: true,
-      contact,
-      lead,
-      conversation,
-      appointment
+      ...result
     };
+
   } catch (error) {
+
     console.error('Transaction error:', error);
+
     return {
       success: false,
       error: error.message
@@ -320,14 +623,15 @@ function createBooking(contactData, leadData, conversationData, appointmentData)
   }
 }
 
-// Initialize database on module load
-initializeDatabase();
+
+/* =========================================================
+   EXPORT
+========================================================= */
 
 module.exports = {
   Contact,
   Lead,
   Conversation,
   Appointment,
-  createBooking,
-  initializeDatabase
+  createBooking
 };

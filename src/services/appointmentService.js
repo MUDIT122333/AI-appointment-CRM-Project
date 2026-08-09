@@ -3,8 +3,19 @@
  * Handles slot validation, booking creation, and appointment retrieval
  */
 
-const { Appointment, Lead, Contact, Conversation, createBooking } = require('../db');
-const { getSlotsForRequestedDate, isSlotAvailable } = require('../slots');
+const {
+  Appointment,
+  Lead,
+  Contact,
+  Conversation,
+  createBooking
+} = require('../db');
+
+const {
+  getSlotsForRequestedDate,
+  isSlotAvailable
+} = require('../slots');
+
 const { formatDateTime } = require('../nlpExtractor');
 
 /**
@@ -12,7 +23,7 @@ const { formatDateTime } = require('../nlpExtractor');
  */
 function getAvailableSlots(requestedDate = null, count = 3) {
   const slots = getSlotsForRequestedDate(requestedDate, count);
-  
+
   // Filter out slots that are in the past
   return slots.filter(slot => isSlotAvailable(slot.date));
 }
@@ -24,13 +35,13 @@ function validateSlot(slotData) {
   if (!slotData || !slotData.date) {
     throw new Error('Invalid slot data');
   }
-  
+
   const slotDate = new Date(slotData.date);
-  
+
   if (!isSlotAvailable(slotDate)) {
     throw new Error('Slot is not available (in the past)');
   }
-  
+
   return true;
 }
 
@@ -38,7 +49,7 @@ function validateSlot(slotData) {
  * Book an appointment with full transaction
  * Creates Contact, Lead, Conversation, and Appointment
  */
-function bookAppointment(bookingData) {
+async function bookAppointment(bookingData) {
   const {
     name,
     email,
@@ -49,25 +60,25 @@ function bookAppointment(bookingData) {
     message,
     slotDate
   } = bookingData;
-  
+
   // Validate required fields
   if (!name) {
     throw new Error('Name is required');
   }
-  
+
   if (!requirement) {
     throw new Error('Requirement is required');
   }
-  
+
   if (!slotDate) {
     throw new Error('Slot date is required');
   }
-  
+
   // Validate slot
   validateSlot({ date: slotDate });
-  
-  // Create booking with transaction
-  const result = createBooking(
+
+  // Create booking
+  const result = await createBooking(
     {
       name,
       email: email || null,
@@ -87,26 +98,38 @@ function bookAppointment(bookingData) {
       status: 'SCHEDULED'
     }
   );
-  
+
   if (!result.success) {
     throw new Error('Failed to create booking: ' + result.error);
   }
-  
+
   return result;
 }
 
 /**
  * Get all appointments with contact and lead information
  */
-function getAllAppointments() {
-  const appointments = Appointment.getAll();
-  const contacts = Contact.getAll();
-  const leads = Lead.getAll();
-  
+async function getAllAppointments() {
+  // Supabase calls are asynchronous
+  const [
+    appointments,
+    contacts,
+    leads
+  ] = await Promise.all([
+    Appointment.getAll(),
+    Contact.getAll(),
+    Lead.getAll()
+  ]);
+
   return appointments.map(appointment => {
-    const contact = contacts.find(c => c.id === appointment.contactId);
-    const lead = leads.find(l => l.id === appointment.leadId);
-    
+    const contact = contacts.find(
+      c => c.id === appointment.contactId
+    );
+
+    const lead = leads.find(
+      l => l.id === appointment.leadId
+    );
+
     return {
       ...appointment,
       contact,
@@ -118,16 +141,21 @@ function getAllAppointments() {
 /**
  * Get appointment by ID with full details
  */
-function getAppointmentById(id) {
-  const appointment = Appointment.getById(id);
-  
+async function getAppointmentById(id) {
+  const appointment = await Appointment.getById(id);
+
   if (!appointment) {
     return null;
   }
-  
-  const contact = Contact.getById(appointment.contactId);
-  const lead = Lead.getById(appointment.leadId);
-  
+
+  const [
+    contact,
+    lead
+  ] = await Promise.all([
+    Contact.getById(appointment.contactId),
+    Lead.getById(appointment.leadId)
+  ]);
+
   return {
     ...appointment,
     contact,
@@ -138,28 +166,50 @@ function getAppointmentById(id) {
 /**
  * Update appointment status
  */
-function updateAppointmentStatus(id, status) {
-  const validStatuses = ['SCHEDULED', 'COMPLETED', 'CANCELLED', 'NO_SHOW'];
-  
+async function updateAppointmentStatus(id, status) {
+  const validStatuses = [
+    'SCHEDULED',
+    'COMPLETED',
+    'CANCELLED',
+    'NO_SHOW'
+  ];
+
   if (!validStatuses.includes(status)) {
-    throw new Error(`Invalid status. Must be one of: ${validStatuses.join(', ')}`);
+    throw new Error(
+      `Invalid status. Must be one of: ${validStatuses.join(', ')}`
+    );
   }
-  
-  return Appointment.update(id, { status });
+
+  return await Appointment.update(id, { status });
 }
 
 /**
  * Get appointments by status
  */
-function getAppointmentsByStatus(status) {
-  const appointments = Appointment.getAll().filter(a => a.status === status);
-  const contacts = Contact.getAll();
-  const leads = Lead.getAll();
-  
-  return appointments.map(appointment => {
-    const contact = contacts.find(c => c.id === appointment.contactId);
-    const lead = leads.find(l => l.id === appointment.leadId);
-    
+async function getAppointmentsByStatus(status) {
+  const [
+    appointments,
+    contacts,
+    leads
+  ] = await Promise.all([
+    Appointment.getAll(),
+    Contact.getAll(),
+    Lead.getAll()
+  ]);
+
+  const filteredAppointments = appointments.filter(
+    appointment => appointment.status === status
+  );
+
+  return filteredAppointments.map(appointment => {
+    const contact = contacts.find(
+      c => c.id === appointment.contactId
+    );
+
+    const lead = leads.find(
+      l => l.id === appointment.leadId
+    );
+
     return {
       ...appointment,
       contact,
@@ -171,8 +221,8 @@ function getAppointmentsByStatus(status) {
 /**
  * Get appointment statistics
  */
-function getAppointmentStats() {
-  return Appointment.getStats();
+async function getAppointmentStats() {
+  return await Appointment.getStats();
 }
 
 /**
