@@ -11,6 +11,14 @@ Build a small working application that demonstrates:
 4. CRM workflow for lead management
 5. Basic voice interaction using browser APIs
 
+**Assignment brief (Mini AI Lead + CRM System):**
+1. Extract the customer's **name, requirement, and lead status** from a message.
+2. Show **3 available meeting slots** (mock slots acceptable).
+3. After a slot is selected, save the **contact, lead, conversation, and appointment**.
+4. Create a simple **CRM dashboard** where these records can be viewed.
+5. Add a basic **Voice Demo** option (browser microphone/speech or simulated voice flow — real telephone calling not required).
+6. No paid services — free tiers, open-source tools, local models, or mock data only.
+
 ## Solution Overview
 
 DISPATCH is a full-stack application that processes customer messages through a rule-based NLP extractor to identify leads, requirements, and meeting requests. It provides an intuitive intake workflow for booking appointments and a professional CRM dashboard for managing leads and appointments.
@@ -29,7 +37,8 @@ DISPATCH is a full-stack application that processes customer messages through a 
 ### Backend
 - **Node.js** - JavaScript runtime
 - **Express.js** - Web framework
-- **Local JSON Storage** - File-based data persistence
+- **PostgreSQL (via Supabase)** - Managed relational database for data persistence
+- **pg (node-postgres)** - PostgreSQL client/connection pooling
 
 ### Frontend
 - **HTML5** - Markup
@@ -57,97 +66,124 @@ flowchart TD
     D --> H[Structured Lead]
     E --> I[Available Slots]
 
-    F --> J[Database Access Layer]
+    F --> J[Database Access Layer - db.js]
     G --> J
     D --> J
 
-    J --> K[(Database - JSON Files)]
+    J --> K[(PostgreSQL - Supabase)]
 
     K --> L[CRM Dashboard]
 ```
 
+This maps directly to the assignment requirements: **NLP Extractor** covers requirement 1 (name/requirement/status extraction), **Slot Service** covers requirement 2 (3 available slots), **Lead/Appointment Services + Database Access Layer** cover requirement 3 (persisting contact, lead, conversation, appointment), the **CRM Dashboard** covers requirement 4, and the **Browser UI**'s voice mode (via the Web Speech API) covers requirement 5.
+
+> **Migration note**: The application originally used local JSON files (`data/*.json`) for persistence. It has since been upgraded to **PostgreSQL, hosted on Supabase**, for proper relational integrity, concurrent access, and production-readiness. The service/API layer (`leadService.js`, `appointmentService.js`, `nlpExtractor.js`, `slots.js`) is unchanged — only `db.js` was rewritten to issue SQL queries against Postgres instead of reading/writing JSON files.
+
 ### Component Architecture
 
 ```
-DISPATCH/
-├── public/                 # Frontend assets
-│   ├── index.html         # Single-page application
-│   ├── style.css          # Dark theme styling
-│   └── app.js             # Frontend JavaScript
-├── src/                   # Backend services
-│   ├── db.js             # Database access layer
-│   ├── nlpExtractor.js   # NLP extraction logic
-│   ├── slots.js          # Meeting slot generation
-│   └── services/         # Business logic services
-│       ├── leadService.js
-│       └── appointmentService.js
-├── data/                  # Local database storage
-│   ├── contacts.json
-│   ├── leads.json
-│   ├── conversations.json
-│   └── appointments.json
-├── server.js             # Express server
-└── package.json          # Dependencies
+CRM-AI-PROJECT/
+├── db/                           # Database schema and migrations
+│   └── schema.sql                # Table definitions for Postgres/Supabase
+├── node_modules/                 # Installed dependencies
+├── public/                       # Frontend assets (browser UI)
+│   ├── app.js                   # Frontend JavaScript (intake, dashboard, voice demo)
+│   ├── index.html               # Single-page application
+│   └── style.css                # Dark theme styling
+├── src/                          # Backend services
+│   ├── services/                 # Business logic layer
+│   │   ├── appointmentService.js
+│   │   └── leadService.js
+│   ├── db.js                     # Database access layer (pg pool + queries)
+│   ├── nlpExtractor.js           # Rule-based NLP extraction logic
+│   └── slots.js                  # Meeting slot generation
+├── .env                           # Local environment configuration (not committed)
+├── .env.example                   # Environment variable reference
+├── .gitignore
+├── package.json                   # Dependencies and scripts
+├── package-lock.json
+├── README.md                      # This file
+├── server.js                      # Express server entry point
+└── test-db.js                     # Manual script for verifying DB read/write
 ```
+
+**Layering notes:**
+- `public/` is the presentation layer — it only talks to the backend through `fetch` calls to the REST API, never touching the database directly.
+- `src/services/` holds orchestration logic (e.g. "booking a slot" touches contacts, leads, conversations, and appointments together in a single transaction) and calls into `src/db.js` for persistence.
+- `src/nlpExtractor.js` and `src/slots.js` are stateless utility modules — pure functions that take text/dates in and return structured data out, called directly by the API routes in `server.js`.
+- `src/db.js` holds a `pg` connection pool and all SQL queries; it's the only module that talks to Postgres, so the rest of the codebase is unaware of the underlying storage engine.
+- `db/schema.sql` defines the four tables (contacts, leads, conversations, appointments) plus foreign keys and indexes — run it once against your Supabase project to provision the schema.
+- `test-db.js` is a standalone script for sanity-checking `src/db.js` reads/writes against the live Postgres instance without starting the full server.
 
 ## Database Design
 
-The application uses a local JSON file-based database with four core entities:
+The application uses **PostgreSQL, hosted on Supabase**, with four core tables. Types map from the original JSON-file model to native Postgres types (UUIDs, enums, timestamps) with foreign-key constraints enforcing the relationships that were previously implicit.
 
-### Contact
-```javascript
-{
-  id: string,
-  name: string,
-  email: string | null,
-  phone: string | null,
-  createdAt: string (ISO date),
-  updatedAt: string (ISO date)
-}
+### contacts
+```sql
+CREATE TABLE contacts (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name        TEXT NOT NULL,
+  email       TEXT,
+  phone       TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 ```
 
-### Lead
-```javascript
-{
-  id: string,
-  contactId: string,
-  requirement: string,
-  status: 'NEW' | 'INTERESTED' | 'QUALIFIED' | 'MEETING_REQUESTED' | 'CONVERTED' | 'LOST',
-  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'HOT',
-  createdAt: string (ISO date),
-  updatedAt: string (ISO date)
-}
+### leads
+```sql
+CREATE TYPE lead_status AS ENUM (
+  'NEW', 'INTERESTED', 'QUALIFIED', 'MEETING_REQUESTED', 'CONVERTED', 'LOST'
+);
+CREATE TYPE lead_priority AS ENUM ('LOW', 'MEDIUM', 'HIGH', 'HOT');
+
+CREATE TABLE leads (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  contact_id   UUID NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+  requirement  TEXT NOT NULL,
+  status       lead_status NOT NULL DEFAULT 'NEW',
+  priority     lead_priority NOT NULL DEFAULT 'MEDIUM',
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 ```
 
-### Conversation
-```javascript
-{
-  id: string,
-  contactId: string,
-  leadId: string,
-  message: string,
-  direction: 'INBOUND' | 'OUTBOUND',
-  createdAt: string (ISO date)
-}
+### conversations
+```sql
+CREATE TYPE conversation_direction AS ENUM ('INBOUND', 'OUTBOUND');
+
+CREATE TABLE conversations (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  contact_id  UUID NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+  lead_id     UUID NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+  message     TEXT NOT NULL,
+  direction   conversation_direction NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 ```
 
-### Appointment
-```javascript
-{
-  id: string,
-  contactId: string,
-  leadId: string,
-  scheduledAt: string (ISO date),
-  status: 'SCHEDULED' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW',
-  createdAt: string (ISO date)
-}
+### appointments
+```sql
+CREATE TYPE appointment_status AS ENUM ('SCHEDULED', 'COMPLETED', 'CANCELLED', 'NO_SHOW');
+
+CREATE TABLE appointments (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  contact_id    UUID NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+  lead_id       UUID NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+  scheduled_at  TIMESTAMPTZ NOT NULL,
+  status        appointment_status NOT NULL DEFAULT 'SCHEDULED',
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 ```
 
 ### Relationships
-- Contact → Lead (One-to-Many)
-- Contact → Conversation (One-to-Many)
-- Lead → Conversation (One-to-Many)
-- Lead → Appointment (One-to-Many)
+- `contacts` → `leads` (One-to-Many, `ON DELETE CASCADE`)
+- `contacts` → `conversations` (One-to-Many, `ON DELETE CASCADE`)
+- `leads` → `conversations` (One-to-Many, `ON DELETE CASCADE`)
+- `leads` → `appointments` (One-to-Many, `ON DELETE CASCADE`)
+
+These constraints are enforced by Postgres itself now (previously handled manually in application code against the JSON files). The full schema lives in `db/schema.sql` and should be run once against your Supabase project (via the SQL Editor or `psql`) before starting the app.
 
 ## API Endpoints
 
@@ -352,6 +388,7 @@ Speech Synthesis Response
 ### Prerequisites
 - Node.js (v14 or higher)
 - npm or yarn
+- A [Supabase](https://supabase.com) project (free tier is sufficient)
 
 ### Installation
 
@@ -366,10 +403,7 @@ cd CRM-AI-PROJECT
 npm install
 ```
 
-3. Create data directory (optional - created automatically):
-```bash
-mkdir -p data
-```
+3. Provision the database schema: open your Supabase project's SQL Editor and run the contents of `db/schema.sql` (or run it via `psql "$DATABASE_URL" -f db/schema.sql`).
 
 ### Environment Variables
 
@@ -378,7 +412,10 @@ Create a `.env` file in the root directory:
 ```env
 PORT=3000
 NODE_ENV=development
+DATABASE_URL=postgresql://postgres:<password>@<project-ref>.supabase.co:5432/postgres
 ```
+
+`DATABASE_URL` is the Postgres connection string from your Supabase project (**Project Settings → Database → Connection string**, "Transaction" or "Session" mode both work with `pg`). If your network requires SSL, `db.js` should be configured with `ssl: { rejectUnauthorized: false }`, which Supabase requires by default.
 
 See `.env.example` for reference.
 
@@ -397,6 +434,17 @@ For development with auto-restart (if nodemon is added):
 ```bash
 npm run dev
 ```
+
+### Verifying the Database Layer
+
+`test-db.js` is a standalone script for sanity-checking `src/db.js` against your live Supabase Postgres instance, without starting the full server — useful after modifying the database access layer or connection config:
+```bash
+node test-db.js
+```
+
+### Backing Up Data
+
+Postgres/Supabase handles durability and backups server-side (Supabase takes automatic daily backups on paid tiers; on the free tier, export manually via `pg_dump "$DATABASE_URL" > backup.sql` before major changes). The old `db-json-backup.js` script is no longer needed and has been removed now that the JSON file store is retired.
 
 ## Example Workflow
 
@@ -443,22 +491,22 @@ npm run dev
 
 1. **NLP Accuracy**: Rule-based extraction may not handle all language variations
 2. **Browser Support**: Voice features limited in some browsers
-3. **Scalability**: Local JSON storage not suitable for production-scale applications
-4. **Concurrency**: No built-in concurrency control for database operations
+3. **Migrations**: Schema changes are applied manually via `db/schema.sql`; no migration tool (e.g. `node-pg-migrate`, Prisma Migrate) is wired up yet
+4. **Connection Pooling**: Default `pg` pool settings are used; not tuned for high concurrency or serverless cold starts
 5. **Security**: Basic input validation, no authentication/authorization
 6. **Testing**: No automated test suite included
 7. **Error Handling**: Basic error handling, could be more comprehensive
 
 ## Future Improvements
 
-1. **Database**: Upgrade to PostgreSQL or MongoDB for production use
-2. **Authentication**: Add user authentication and role-based access
+1. **Migrations**: Adopt a migration tool (e.g. `node-pg-migrate`, Prisma Migrate) instead of a single hand-run `schema.sql`
+2. **Authentication**: Add user authentication and role-based access (Supabase Auth is a natural fit here)
 3. **Advanced NLP**: Integrate more sophisticated NLP (still local/self-hosted)
 4. **Testing**: Add unit tests, integration tests, and E2E tests
 5. **Validation**: Enhance input validation and sanitization
 6. **Logging**: Implement structured logging and monitoring
 7. **API Documentation**: Add Swagger/OpenAPI documentation
-8. **Performance**: Implement caching, pagination, and optimization
+8. **Performance**: Implement caching, pagination, connection-pool tuning, and query optimization/indexing
 9. **Internationalization**: Add multi-language support
 10. **Email Notifications**: Send confirmation emails for bookings
 11. **Calendar Integration**: Sync with external calendar systems
@@ -486,10 +534,6 @@ npm run dev
 ## License
 
 MIT License
-
-## Author
-
-Built as a 24-hour SDE take-home assignment.
 
 ## Acknowledgments
 
